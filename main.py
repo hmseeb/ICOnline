@@ -3,6 +3,8 @@ import time
 import aiohttp
 import pandas as pd
 from bs4 import BeautifulSoup
+
+
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
 categories = []
