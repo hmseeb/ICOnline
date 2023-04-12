@@ -18,7 +18,7 @@ manufacturers = []
 pdfs = []
 data = {}
 
-#scrapped data
+# scrapped data
 scrapped_mpns = []
 scrapped_skus = []
 scrapped_descriptions = []
@@ -89,6 +89,7 @@ async def fetch(session, url):
     try:
         async with session.get(url, headers=headers) as response:
             if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
+                print(response.url)
                 return await response.text()
             return '404'
 
