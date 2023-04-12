@@ -3,6 +3,7 @@ import time
 import aiohttp
 import pandas as pd
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
@@ -16,6 +17,13 @@ descriptions = []
 manufacturers = []
 pdfs = []
 data = {}
+
+#scrapped data
+scrapped_mpns = []
+scrapped_skus = []
+scrapped_descriptions = []
+scrapped_manufacturers = []
+scrapped_pdfs = []
 
 
 def fetch_data():
@@ -51,7 +59,8 @@ def homepage_scraper(home_page):
             urls.append(url + '?product_list_limit=120')
             categories.append(category)
 
-def sub_url_scraper(res):
+
+async def sub_url_scraper(res):
     try:
         soup = BeautifulSoup(res, 'html.parser')
         container = soup.select('div.product-items')[0]
@@ -94,20 +103,27 @@ async def main(url):
         if isinstance(url, str):
             return await fetch(session, url)
         else:
-            for url in urls:
+            for url in tqdm(urls, desc="Progress"):
                 # reset page counter for each URL
-                page_counter = 56
+                page_counter = 2
+                print()
+                # scrape the main URL first
+                task = asyncio.create_task(fetch(session, url))
+                tasks.append(task)
+                response = await task
+                await sub_url_scraper(response)
+                # then, scrape paginated URLs
                 while True:
                     url_with_pagination = f"{url}&p={page_counter}"
                     task = asyncio.create_task(fetch(session, url_with_pagination))
                     tasks.append(task)
                     response = await task
                     if response == '404':
-                        print(f'Scrapped {url}')
                         break  # end pagination
                     else:
-                        sub_url_scraper(response)
+                        await sub_url_scraper(response)
                         page_counter += 1
+
         responses = await asyncio.gather(*tasks)
         return ''.join(responses)
 
@@ -117,7 +133,7 @@ if __name__ == '__main__':
     main_page = asyncio.run(main(base_url))
     homepage_scraper(main_page)
     sub_url = asyncio.run(main(urls))
-    print(f'Scrapping complete! {len(mpns)} items found.')
     frame = pd.DataFrame(fetch_data())
     frame.to_json('data.json', orient='records')
-    print(f'Time elapsed: {time.time() - start_time}')
+    print(f'{len(mpns)} Items scrapped.')
+    print(f'Time elapsed: {float((time.time() - start_time)/60)} minutes.')
