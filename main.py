@@ -126,7 +126,7 @@ async def main(url):
                             break  # end pagination
                         page_counter += 1
                         responses.append(response)
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
             return ''.join(results)
 
 
