@@ -4,11 +4,13 @@ import aiohttp
 import pandas as pd
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
 categories = []
 pagination_urls = []
+responses = []
 
 # data
 mpns = []
@@ -63,7 +65,7 @@ def homepage_scraper(home_page):
 async def sub_url_scraper(res):
     try:
         soup = BeautifulSoup(res, 'html.parser')
-        container = soup.select('div.product-items')[0]
+        container = soup.select_one('div.product-items')
         div = container.find_all('div', class_='item')
         for d in div:
             mpn = d.select('a.product-item-link')
@@ -71,7 +73,6 @@ async def sub_url_scraper(res):
             des = d.find_all('div', class_='desc')
             man = d.find_all('div', class_='brand')
             pdf = d.select('div > div:not([class]):nth-of-type(5) a')
-
             for mp, sk, de, ma, p in zip(mpn, sku, des, man, pdf):
                 mpns.append(mp.text.strip())
                 skus.append(sk.text.strip())
@@ -89,13 +90,13 @@ async def fetch(session, url):
     try:
         async with session.get(url, headers=headers) as response:
             if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
-                print(response.url)
                 return await response.text()
             return '404'
 
     except aiohttp.ClientError as e:
         print(f"Error fetching {url}: {e}")
         return
+
 
 semaphore = asyncio.Semaphore(50)
 
@@ -110,7 +111,6 @@ async def main(url):
                 for url in tqdm(urls, desc="Progress"):
                     # reset page counter for each URL
                     page_counter = 2
-                    print()
                     # scrape the main URL first
                     task = asyncio.create_task(fetch(session, url))
                     tasks.append(task)
@@ -124,12 +124,15 @@ async def main(url):
                         response = await task
                         if response == '404':
                             break  # end pagination
-                        else:
-                            await sub_url_scraper(response)
-                            page_counter += 1
+                        page_counter += 1
+                        responses.append(response)
+            await asyncio.gather(*tasks)
+            return ''.join(results)
 
-            responses = await asyncio.gather(*tasks)
-            return ''.join(responses)
+
+def scrape(res):
+    for response in res:
+        sub_url_scraper(response)
 
 
 if __name__ == '__main__':
@@ -137,6 +140,8 @@ if __name__ == '__main__':
     main_page = asyncio.run(main(base_url))
     homepage_scraper(main_page)
     sub_url = asyncio.run(main(urls))
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        executor.map(scrape, responses)
     frame = pd.DataFrame(fetch_data())
     frame.to_json('data.json', orient='records')
     print(f'{len(mpns)} Items scrapped.')
