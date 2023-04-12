@@ -1,0 +1,6 @@
+asyncio
+time
+aiohttp
+pandas
+bs4
+tqdm
