@@ -97,36 +97,39 @@ async def fetch(session, url):
         print(f"Error fetching {url}: {e}")
         return
 
+semaphore = asyncio.Semaphore(50)
+
 
 async def main(url):
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        if isinstance(url, str):
-            return await fetch(session, url)
-        else:
-            for url in tqdm(urls, desc="Progress"):
-                # reset page counter for each URL
-                page_counter = 2
-                print()
-                # scrape the main URL first
-                task = asyncio.create_task(fetch(session, url))
-                tasks.append(task)
-                response = await task
-                await sub_url_scraper(response)
-                # then, scrape paginated URLs
-                while True:
-                    url_with_pagination = f"{url}&p={page_counter}"
-                    task = asyncio.create_task(fetch(session, url_with_pagination))
+    async with semaphore:
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            if isinstance(url, str):
+                return await fetch(session, url)
+            else:
+                for url in tqdm(urls, desc="Progress"):
+                    # reset page counter for each URL
+                    page_counter = 2
+                    print()
+                    # scrape the main URL first
+                    task = asyncio.create_task(fetch(session, url))
                     tasks.append(task)
                     response = await task
-                    if response == '404':
-                        break  # end pagination
-                    else:
-                        await sub_url_scraper(response)
-                        page_counter += 1
+                    await sub_url_scraper(response)
+                    # then, scrape paginated URLs
+                    while True:
+                        url_with_pagination = f"{url}&p={page_counter}"
+                        task = asyncio.create_task(fetch(session, url_with_pagination))
+                        tasks.append(task)
+                        response = await task
+                        if response == '404':
+                            break  # end pagination
+                        else:
+                            await sub_url_scraper(response)
+                            page_counter += 1
 
-        responses = await asyncio.gather(*tasks)
-        return ''.join(responses)
+            responses = await asyncio.gather(*tasks)
+            return ''.join(responses)
 
 
 if __name__ == '__main__':
@@ -137,4 +140,4 @@ if __name__ == '__main__':
     frame = pd.DataFrame(fetch_data())
     frame.to_json('data.json', orient='records')
     print(f'{len(mpns)} Items scrapped.')
-    print(f'Time elapsed: {float((time.time() - start_time)/60)} minutes.')
+    print(f'Time elapsed: {float((time.time() - start_time) / 60)} minutes.')
