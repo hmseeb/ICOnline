@@ -115,7 +115,7 @@ async def fetch(session, url):
                 await sub_url_scraper(await response.text(), response.url, session)
             return '404'
 
-    except aiohttp.ClientError as e:
+    except Exception as e:
         print(f"Error fetching {url}: {e}")
         return
 
