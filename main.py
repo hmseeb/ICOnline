@@ -4,8 +4,6 @@ import aiohttp
 import pandas as pd
 from bs4 import BeautifulSoup
 import os
-from tqdm import tqdm
-import threading
 
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
@@ -39,11 +37,11 @@ headers = {
 
 async def fetch_homepage(url):
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
+        async with session.get(url, ssl=False) as response:
             return await response.text()
 
 
-def homepage_scraper(home_page):
+async def homepage_scraper(home_page):
     soup = BeautifulSoup(home_page, 'html.parser')
     div = soup.select('div.all-catePage')[0]
     uls = div.find_all('ul')
@@ -58,37 +56,42 @@ def homepage_scraper(home_page):
 
 
 async def scrape(res):
-    soup = BeautifulSoup(res, 'html.parser')
-    container = soup.select_one('div.product-items')
-    div = container.find_all('div', class_='item')
-    for d in div:
-        mpn = d.select('a.product-item-link')
-        sku = d.select('div > div:not([class]):nth-of-type(2)')
-        des = d.find_all('div', class_='desc')
-        man = d.find_all('div', class_='brand')
-        pdf = d.select('div > div:not([class]):nth-of-type(5) a')
-        for mp, sk, de, ma, p in zip(mpn, sku, des, man, pdf):
-            mpns.append(mp.text.strip())
-            skus.append(sk.text.strip())
-            descriptions.append(de.text.strip())
-            manufacturers.append(ma.text.strip())
-            pdfs.append(p['href'])
-    data = {
-        'MPN': mpns,
-        'SKU': skus,
-        'Description': descriptions,
-        'Manufacturer': manufacturers,
-        'PDF': pdfs,
-    }
-    print(mpns[len(mpns) -1])
-    # frame = pd.DataFrame(data)
-    # frame.to_json('data.json', mode='a', lines=True, orient='records')
-    # frame.to_csv('data.csv', mode='a', header=not os.path.isfile('data.csv'), index=False)
-    mpns.clear()
-    skus.clear()
-    descriptions.clear()
-    manufacturers.clear()
-    pdfs.clear()
+    try:
+        soup = BeautifulSoup(res, 'html.parser')
+        container = soup.select_one('div.product-items')
+        div = container.find_all('div', class_='item')
+        for d in div:
+            mpn = d.select('a.product-item-link')
+            sku = d.select('div > div:not([class]):nth-of-type(2)')
+            des = d.find_all('div', class_='desc')
+            man = d.find_all('div', class_='brand')
+            pdf = d.select('div > div:not([class]):nth-of-type(5) a')
+            for mp, sk, de, ma, p in zip(mpn, sku, des, man, pdf):
+                mpns.append(mp.text.strip())
+                skus.append(sk.text.strip())
+                descriptions.append(de.text.strip())
+                manufacturers.append(ma.text.strip())
+                pdfs.append(p['href'])
+        data = {
+            'MPN': mpns,
+            'SKU': skus,
+            'Description': descriptions,
+            'Manufacturer': manufacturers,
+            'PDF': pdfs,
+        }
+        frame = pd.DataFrame(data)
+        csv = 'data.csv'
+        frame.to_csv(csv, mode='a', header=not os.path.isfile(
+            'data.csv'), index=False)
+        df = pd.read_csv(csv)
+        print(f'Scrapped {len(df)} items so far.')
+        mpns.clear()
+        skus.clear()
+        descriptions.clear()
+        manufacturers.clear()
+        pdfs.clear()
+    except Exception as e:
+        print(f'Error: {e}')
 
 
 async def sub_url_scraper(res, res_url, session):
@@ -96,7 +99,7 @@ async def sub_url_scraper(res, res_url, session):
     page_counter = 2
     while True:
         url_with_pagination = f"{res_url}&p={page_counter}"
-        async with session.get(url_with_pagination) as response:
+        async with session.get(url_with_pagination, ssl=False) as response:
             if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
                 await scrape(res_url)
             else:
@@ -105,8 +108,9 @@ async def sub_url_scraper(res, res_url, session):
 
 
 async def fetch(session, url):
+    await asyncio.sleep(1)
     try:
-        async with session.get(url, headers=headers) as response:
+        async with session.get(url, headers=headers, ssl=False) as response:
             if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
                 await sub_url_scraper(await response.text(), response.url, session)
             return '404'
@@ -119,28 +123,15 @@ async def fetch(session, url):
 async def main():
     async with aiohttp.ClientSession() as session:
         tasks = []
-        for url in urls:
+        for url in urls[:]:
             task = asyncio.ensure_future(fetch(session, url))
             tasks.append(task)
         await asyncio.gather(*tasks)
 
 
-def run_loop(loop):
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
-
-
 if __name__ == '__main__':
     start_time = time.time()
     main_page = asyncio.run(fetch_homepage(base_url))
-    homepage_scraper(main_page)
-    threads = []
-    for i in range(8):
-        loop = asyncio.new_event_loop()
-        t = threading.Thread(target=run_loop, args=(loop,))
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    print(f'{len(mpns)} Items scrapped.')
+    asyncio.run(homepage_scraper(main_page))
+    asyncio.run(main())
     print(f'Time elapsed: {float((time.time() - start_time) / 60)} minutes.')
