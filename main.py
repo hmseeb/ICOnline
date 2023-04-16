@@ -8,8 +8,6 @@ import os
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
 categories = []
-pagination_urls = []
-responses = []
 
 # data
 mpns = []
@@ -31,13 +29,13 @@ headers = {
     'Accept-Language': 'en-US,en;q=0.5',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
-    'Cache-Control': 'max-age=0',
+    "Cache-Control": "no-cache, max-age=0"
 }
 
 
 async def fetch_homepage(url):
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, ssl=False) as response:
+        async with session.get(url) as response:
             return await response.text()
 
 
@@ -59,7 +57,7 @@ async def scrape(res):
     try:
         soup = BeautifulSoup(res, 'html.parser')
         container = soup.select_one('div.product-items')
-        div = container.find_all('div', class_='item')
+        div = container.find_all('div', class_='tr item')
         for d in div:
             mpn = d.select('a.product-item-link')
             sku = d.select('div > div:not([class]):nth-of-type(2)')
@@ -83,6 +81,7 @@ async def scrape(res):
         csv = 'data.csv'
         frame.to_csv(csv, mode='a', header=not os.path.isfile(
             'data.csv'), index=False)
+        frame.to_json('data.json', orient='records', lines=True, mode='a')
         df = pd.read_csv(csv)
         print(f'Scrapped {len(df)} items so far.')
         mpns.clear()
@@ -94,39 +93,51 @@ async def scrape(res):
         print(f'Error: {e}')
 
 
-async def sub_url_scraper(res, res_url, session):
-    await scrape(res)
+async def url_scraper(response, session):  # Got a url response from list
+    url = response.url
+    response = await response.text()
+    if url in urls:
+        await scrape(response)  # Scrape first url
     page_counter = 2
     while True:
-        url_with_pagination = f"{res_url}&p={page_counter}"
-        async with session.get(url_with_pagination, ssl=False) as response:
-            if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
-                await scrape(res_url)
-            else:
-                return
+        url = f"{url}&p={page_counter}"
+        response = await fetch(session, url)
+        if response is None:
+            return
+        else:
+            await scrape(response)
             page_counter += 1
 
 
 async def fetch(session, url):
-    await asyncio.sleep(1)
     try:
-        async with session.get(url, headers=headers, ssl=False) as response:
-            if 'Manufacturer Part No' in await response.text() or str(response.url) == base_url:
-                await sub_url_scraper(await response.text(), response.url, session)
-            return '404'
-
-    except Exception as e:
+        if url in urls:
+            async with session.get(url, headers=headers) as response:
+                await url_scraper(response, session)
+        else:
+            async with session.get(url, headers=headers) as response:
+                url = response.url
+                response = await response.text()
+                if 'Manufacturer Part No' in response or str(url) == base_url:
+                    return response
+                else:
+                    return None
+    except aiohttp.ClientError as e:
         print(f"Error fetching {url}: {e}")
-        return
+        return '404'
+
+
+semaphore = asyncio.Semaphore(10)
 
 
 async def main():
-    async with aiohttp.ClientSession() as session:
-        tasks = []
-        for url in urls[:]:
-            task = asyncio.ensure_future(fetch(session, url))
-            tasks.append(task)
-        await asyncio.gather(*tasks)
+    async with semaphore:
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for url in urls[:]:
+                task = asyncio.ensure_future(fetch(session, url))
+                tasks.append(task)
+            await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
