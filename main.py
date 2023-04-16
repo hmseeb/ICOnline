@@ -4,6 +4,8 @@ import aiohttp
 import pandas as pd
 from bs4 import BeautifulSoup
 import os
+import logging
+logging.basicConfig(filename='app.log', format='%(levelname)s - %(message)s', datefmt='%d-%m-%y %H:%M:%S')
 
 base_url = 'https://ic-online.com/all-product.html'
 urls = []
@@ -36,7 +38,8 @@ headers = {
 async def fetch_homepage(url):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            return await response.text()
+            response = await response.text()
+            return response
 
 
 async def homepage_scraper(home_page):
@@ -90,7 +93,7 @@ async def scrape(res):
         manufacturers.clear()
         pdfs.clear()
     except Exception as e:
-        print(f'Error: {e}')
+        logging.error(e)
 
 
 async def url_scraper(response, session):  # Got a url response from list
@@ -112,32 +115,30 @@ async def url_scraper(response, session):  # Got a url response from list
 async def fetch(session, url):
     try:
         if url in urls:
-            async with session.get(url, headers=headers) as response:
+            async with session.get(url, headers=headers, timeout=60) as response:
                 await url_scraper(response, session)
         else:
-            async with session.get(url, headers=headers) as response:
+            async with session.get(url, headers=headers, timeout=60) as response:
                 url = response.url
                 response = await response.text()
                 if 'Manufacturer Part No' in response or str(url) == base_url:
                     return response
                 else:
                     return None
-    except aiohttp.ClientError as e:
-        print(f"Error fetching {url}: {e}")
-        return '404'
-
-
-semaphore = asyncio.Semaphore(10)
+    except Exception as e:
+        logging.error(f'An error occurred! {str(e)}')
+        logging.error(f'Creating a new session for {url}...')
+        async with aiohttp.ClientSession() as session:
+            return await fetch(session, url)
 
 
 async def main():
-    async with semaphore:
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-            for url in urls[:]:
-                task = asyncio.ensure_future(fetch(session, url))
-                tasks.append(task)
-            await asyncio.gather(*tasks)
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for url in urls[:]:
+            task = asyncio.ensure_future(fetch(session, url))
+            tasks.append(task)
+        await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
@@ -145,4 +146,4 @@ if __name__ == '__main__':
     main_page = asyncio.run(fetch_homepage(base_url))
     asyncio.run(homepage_scraper(main_page))
     asyncio.run(main())
-    print(f'Time elapsed: {float((time.time() - start_time) / 60)} minutes.')
+    logging.info(f'Total time elapsed: {float((time.time() - start_time) / 60)} minutes.')
